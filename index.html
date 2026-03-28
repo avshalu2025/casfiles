@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>CAS Malampuzha – File Location Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Source+Sans+3:wght@300;400;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+/* ============================================================
+   CONFIGURATION NOTE FOR ADMIN:
+   The Excel database file must be named:  casfiles.xlsx
+   and placed in the SAME FOLDER as this HTML file on GitHub.
+   To rename it, change DB_FILENAME in the <script> section.
+   ============================================================ */
+:root {
+  --bg: #0d1b2a;
+  --surface: #112233;
+  --card: #162840;
+  --card2: #1a3050;
+  --border: #1e3a5f;
+  --accent: #e8a020;
+  --accent2: #4db8ff;
+  --text: #dce8f5;
+  --muted: #6b8fae;
+  --success: #2ecc71;
+  --danger: #e74c3c;
+  --radius: 12px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 16px; -webkit-text-size-adjust: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Source Sans 3', sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── HEADER ── */
+header {
+  background: linear-gradient(135deg, #0a1628 0%, #112233 60%, #1a2e4a 100%);
+  border-bottom: 2px solid var(--accent);
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 20px; height: 72px;
+  position: sticky; top: 0; z-index: 100;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.45);
+  overflow: hidden;
+}
+header::before {
+  content: ''; position: absolute; inset: 0;
+  background: repeating-linear-gradient(90deg,transparent,transparent 60px,rgba(255,255,255,0.013) 60px,rgba(255,255,255,0.013) 61px);
+  pointer-events: none;
+}
+.hdr-emblem {
+  width: 46px; height: 46px; background: var(--accent);
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 20px; flex-shrink: 0;
+  box-shadow: 0 0 18px rgba(232,160,32,0.5); z-index: 1;
+}
+.hdr-text { z-index: 1; flex: 1; min-width: 0; }
+.hdr-text h1 {
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(0.95rem, 3.5vw, 1.5rem);
+  font-weight: 900; color: #fff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.hdr-text h1 span { color: var(--accent); }
+.hdr-text p {
+  font-size: clamp(0.55rem, 1.7vw, 0.7rem);
+  color: var(--muted); letter-spacing: 0.08em;
+  text-transform: uppercase; margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.hdr-badge {
+  flex-shrink: 0; z-index: 1;
+  background: rgba(77,184,255,0.12); border: 1px solid var(--accent2);
+  color: var(--accent2); font-size: 0.62rem; letter-spacing: 0.1em;
+  text-transform: uppercase; padding: 4px 10px; border-radius: 20px;
+}
+@media (max-width: 480px) { .hdr-badge { display: none; } }
+
+/* ── LOADING SCREEN ── */
+#loadingScreen {
+  position: fixed; inset: 0; background: var(--bg);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  z-index: 999; gap: 20px;
+}
+.loader-ring {
+  width: 56px; height: 56px;
+  border: 4px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loader-text { color: var(--muted); font-size: 0.88rem; letter-spacing: 0.06em; }
+.loader-sub   { color: var(--accent2); font-size: 0.75rem; letter-spacing: 0.04em; }
+
+/* ── ERROR SCREEN ── */
+#errorScreen {
+  display: none; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 60px 24px; text-align: center; gap: 14px;
+}
+.err-icon  { font-size: 3rem; }
+.err-title { font-size: 1.1rem; font-weight: 600; color: var(--danger); }
+.err-msg   { font-size: 0.85rem; color: var(--muted); max-width: 420px; line-height: 1.6; }
+.err-code  {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 18px;
+  font-family: monospace; font-size: 0.8rem; color: var(--accent);
+  max-width: 480px; word-break: break-all;
+}
+.err-hint {
+  background: rgba(232,160,32,0.08); border: 1px solid rgba(232,160,32,0.3);
+  border-radius: 10px; padding: 14px 20px; max-width: 500px;
+  font-size: 0.82rem; color: var(--text); line-height: 1.7; text-align: left;
+}
+.err-hint strong { color: var(--accent); }
+
+/* ── MAIN CONTAINER ── */
+.container { max-width: 1280px; margin: 0 auto; padding: 20px 14px 80px; display: none; }
+
+/* ── STATUS BAR ── */
+.status-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: rgba(46,204,113,0.08); border: 1px solid rgba(46,204,113,0.3);
+  border-radius: 10px; padding: 10px 16px; margin-bottom: 18px;
+  font-size: 0.82rem; color: var(--success);
+}
+.status-bar .db-name { font-weight: 600; }
+.status-bar .db-time { margin-left: auto; color: var(--muted); font-size: 0.75rem; }
+
+/* ── SEARCH ── */
+.search-main { display: flex; gap: 8px; margin-bottom: 8px; }
+.search-main input {
+  flex: 1; background: var(--card);
+  border: 1.5px solid var(--border);
+  color: var(--text); border-radius: 10px;
+  padding: 12px 14px; font-size: 1rem;
+  font-family: inherit; outline: none; min-height: 48px;
+  transition: border-color 0.2s;
+}
+.search-main input:focus { border-color: var(--accent2); }
+.search-main input::placeholder { color: var(--muted); }
+.filter-btn {
+  background: var(--card); border: 1.5px solid var(--border);
+  color: var(--accent2); border-radius: 10px;
+  padding: 0 16px; font-size: 0.82rem; font-weight: 600;
+  letter-spacing: 0.05em; text-transform: uppercase;
+  cursor: pointer; min-height: 48px; white-space: nowrap;
+  display: flex; align-items: center; gap: 6px;
+  font-family: inherit; transition: background 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+.filter-btn.active { background: rgba(77,184,255,0.12); border-color: var(--accent2); }
+.fdot { width: 7px; height: 7px; background: var(--accent); border-radius: 50%; display: none; }
+.filter-btn.has-filters .fdot { display: block; }
+
+/* ── FILTER PANEL ── */
+.filters-panel {
+  display: none;
+  grid-template-columns: 1fr 1fr 1fr; gap: 8px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 14px; margin-bottom: 8px;
+  animation: slideDown 0.2s ease;
+}
+.filters-panel.open { display: grid; }
+@keyframes slideDown { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:translateY(0)} }
+@media (max-width: 520px) { .filters-panel { grid-template-columns: 1fr 1fr; } }
+
+.fg { display: flex; flex-direction: column; gap: 4px; }
+.fg label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+.fg select {
+  background: var(--surface); border: 1.5px solid var(--border);
+  color: var(--text); border-radius: 8px; padding: 9px 28px 9px 10px;
+  font-size: 0.9rem; font-family: inherit; outline: none; min-height: 42px;
+  appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%236b8fae' d='M6 8L0 0h12z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center;
+}
+.fg select option { background: #162840; }
+.f-actions { grid-column: 1/-1; display: flex; justify-content: flex-end; margin-top: 4px; }
+.btn-reset {
+  background: transparent; border: 1px solid var(--muted);
+  color: var(--muted); border-radius: 8px; padding: 8px 18px;
+  font-size: 0.82rem; font-family: inherit; cursor: pointer; min-height: 38px;
+  transition: border-color 0.2s, color 0.2s;
+}
+.btn-reset:hover { border-color: var(--accent2); color: var(--accent2); }
+
+/* ── STATS ── */
+.stats-row { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.stat-chip {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 14px;
+  font-size: 0.78rem; color: var(--muted);
+  flex: 1; min-width: 80px; text-align: center;
+}
+.stat-chip strong { display: block; color: var(--accent); font-size: 1.3rem; line-height: 1.2; }
+
+/* ── VIEW TOGGLE ── */
+.view-toggle { display: none; gap: 6px; margin-bottom: 12px; align-items: center; }
+.vbtn {
+  background: var(--card); border: 1.5px solid var(--border);
+  color: var(--muted); border-radius: 8px; padding: 7px 14px;
+  font-size: 0.78rem; font-family: inherit; cursor: pointer;
+  min-height: 36px; display: flex; align-items: center; gap: 5px;
+  transition: all 0.15s;
+}
+.vbtn.active { background: rgba(77,184,255,0.12); border-color: var(--accent2); color: var(--accent2); }
+.result-count { margin-left: auto; font-size: 0.8rem; color: var(--muted); }
+
+/* ── TABLE ── */
+.table-wrap {
+  overflow-x: auto; border-radius: var(--radius);
+  border: 1px solid var(--border); -webkit-overflow-scrolling: touch;
+}
+table { width: 100%; border-collapse: collapse; font-size: 0.875rem; min-width: 700px; }
+thead tr { background: linear-gradient(90deg,#162840,#1a3350); border-bottom: 2px solid var(--accent); }
+th {
+  padding: 12px 14px; text-align: left;
+  font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--accent); white-space: nowrap; cursor: pointer; user-select: none;
+}
+th:hover, th.sorted { color: #fff; }
+.sico { opacity: 0.35; margin-left: 3px; }
+th.sorted .sico { opacity: 1; }
+tbody tr { border-bottom: 1px solid rgba(30,58,95,0.5); transition: background 0.12s; }
+tbody tr:hover { background: rgba(77,184,255,0.06); }
+td { padding: 11px 14px; color: var(--text); vertical-align: middle; }
+td.sl { color: var(--muted); font-size: 0.78rem; }
+.no-data { text-align: center; padding: 50px 20px; color: var(--muted); }
+.no-data .icon { font-size: 2.8rem; margin-bottom: 10px; }
+
+/* ── CARDS ── */
+.cards-wrap { display: none; }
+.file-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px;
+  margin-bottom: 10px; transition: border-color 0.15s;
+}
+.file-card:active { border-color: var(--accent2); }
+.card-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 8px; gap: 8px; }
+.card-title { font-size: 0.95rem; font-weight: 600; color: #fff; line-height: 1.3; flex: 1; }
+.card-sl { font-size: 0.7rem; color: var(--muted); background: rgba(255,255,255,0.06); border-radius: 4px; padding: 2px 7px; flex-shrink: 0; margin-top: 2px; }
+.card-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.card-loc { font-size: 0.8rem; color: var(--muted); display: flex; align-items: center; gap: 5px; }
+.card-loc span { color: var(--text); }
+.empty-state { text-align: center; padding: 50px 20px; color: var(--muted); }
+.empty-state .icon { font-size: 3rem; margin-bottom: 12px; }
+
+/* ── BADGES ── */
+.badge { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 12px; font-size: 0.72rem; font-weight: 600; white-space: nowrap; }
+.b-alm  { background: rgba(232,160,32,0.15); color: var(--accent); border: 1px solid rgba(232,160,32,0.3); }
+.b-rack { background: rgba(77,184,255,0.12); color: var(--accent2); border: 1px solid rgba(77,184,255,0.25); }
+.b-type { background: rgba(46,204,113,0.1); color: #2ecc71; border: 1px solid rgba(46,204,113,0.25); }
+.b-fno  { background: rgba(180,100,255,0.12); color: #c084fc; border: 1px solid rgba(180,100,255,0.3); }
+mark { background: rgba(232,160,32,0.3); color: #fff; border-radius: 3px; padding: 0 2px; }
+
+/* ── PAGINATION ── */
+.pagination { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; flex-wrap: wrap; gap: 10px; }
+.pg-info { font-size: 0.78rem; color: var(--muted); }
+.pg-btns { display: flex; gap: 5px; flex-wrap: wrap; }
+.pg-btn {
+  background: var(--card); border: 1px solid var(--border);
+  color: var(--text); border-radius: 7px; padding: 7px 13px;
+  font-size: 0.82rem; cursor: pointer; min-height: 40px; min-width: 40px;
+  font-family: inherit; transition: border-color 0.15s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.pg-btn:hover:not(:disabled), .pg-btn.active { border-color: var(--accent2); color: var(--accent2); }
+.pg-btn:disabled { opacity: 0.3; cursor: default; }
+
+/* ── RESPONSIVE ── */
+@media (max-width: 700px) {
+  .container { padding: 14px 10px 80px; }
+  .table-view .table-wrap, .card-view .table-wrap { display: none !important; }
+  .table-view .cards-wrap, .card-view .cards-wrap { display: block !important; }
+  .view-toggle { display: none !important; }
+  header { padding: 0 12px; gap: 10px; }
+}
+@media (min-width: 701px) {
+  .view-toggle { display: flex; }
+  .table-view .table-wrap { display: block; }
+  .table-view .cards-wrap { display: none; }
+  .card-view  .table-wrap { display: none; }
+  .card-view  .cards-wrap { display: block; }
+}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="hdr-emblem">📁</div>
+  <div class="hdr-text">
+    <h1><span>CAS</span> Malampuzha</h1>
+    <p>File Location Tracker · Almirah &amp; Rack Management System</p>
+  </div>
+  <div class="hdr-badge">Record Mgmt</div>
+</header>
+
+<!-- LOADING SCREEN -->
+<div id="loadingScreen">
+  <div class="loader-ring"></div>
+  <div class="loader-text">Loading database…</div>
+  <div class="loader-sub" id="loadingSub">Fetching casfiles.xlsx</div>
+</div>
+
+<!-- ERROR SCREEN -->
+<div id="errorScreen" class="container" style="display:none; padding-top:40px;">
+  <div class="err-icon">⚠️</div>
+  <div class="err-title">Database Not Found</div>
+  <div class="err-msg" id="errMsg">Could not load the Excel database file.</div>
+  <div class="err-code" id="errCode"></div>
+  <div class="err-hint">
+    <strong>Admin – How to fix this:</strong><br>
+    1. Make sure the Excel file is named exactly: <strong>casfiles.xlsx</strong><br>
+    2. Upload <strong>both</strong> files to the <strong>same folder</strong> in your GitHub repository:<br>
+    &nbsp;&nbsp;&nbsp;📄 <strong>casfiletracker.html</strong><br>
+    &nbsp;&nbsp;&nbsp;📊 <strong>casfiles.xlsx</strong><br>
+    3. Enable <strong>GitHub Pages</strong> for your repository (Settings → Pages → Deploy from branch)<br>
+    4. Open the live link — the database will load automatically.<br><br>
+    <strong>To use a different filename:</strong> edit <code>DB_FILENAME</code> at the top of the &lt;script&gt; section.
+  </div>
+</div>
+
+<!-- MAIN APP (shown after successful load) -->
+<div class="container" id="appContainer">
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <span>✅</span>
+    <span class="db-name" id="dbName">casfiles.xlsx</span>
+    <span style="color:var(--muted)">—</span>
+    <span id="dbCount" style="color:var(--text)"></span> records loaded
+    <span class="db-time" id="dbTime"></span>
+  </div>
+
+  <!-- Search -->
+  <div class="search-main">
+    <input type="text" id="searchGlobal"
+      placeholder="🔍  Search by file name, almirah, rack, location, type…"
+      oninput="applyFilters()"
+      autocomplete="off" autocorrect="off" spellcheck="false">
+    <button class="filter-btn" id="filterBtn" onclick="toggleFilters()">
+      ⚙ Filters <span class="fdot"></span>
+    </button>
+  </div>
+
+  <!-- Filter panel -->
+  <div class="filters-panel" id="filtersPanel">
+    <div class="fg">
+      <label>Almirah No</label>
+      <select id="filterAlmirah" onchange="applyFilters()"><option value="">All Almirahs</option></select>
+    </div>
+    <div class="fg">
+      <label>Rack No</label>
+      <select id="filterRack" onchange="applyFilters()"><option value="">All Racks</option></select>
+    </div>
+    <div class="fg">
+      <label>File Type</label>
+      <select id="filterType" onchange="applyFilters()"><option value="">All Types</option></select>
+    </div>
+    <div class="f-actions">
+      <button class="btn-reset" onclick="resetFilters()">✕ Reset All</button>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-row">
+    <div class="stat-chip"><strong id="sTotalFiles">0</strong>Total Files</div>
+    <div class="stat-chip"><strong id="sAlmirahs">0</strong>Almirahs</div>
+    <div class="stat-chip"><strong id="sRacks">0</strong>Racks</div>
+    <div class="stat-chip"><strong id="sFiltered">0</strong>Shown</div>
+  </div>
+
+  <!-- View toggle (PC) -->
+  <div class="view-toggle" id="viewToggle">
+    <button class="vbtn active" id="btnTV" onclick="setView('table')">☰ Table</button>
+    <button class="vbtn"        id="btnCV" onclick="setView('card')">⊞ Cards</button>
+    <span class="result-count" id="resultCount"></span>
+  </div>
+
+  <!-- Results -->
+  <div id="resultsWrap" class="table-view">
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th id="th0" onclick="sortBy(0)">Sl No <span class="sico">↕</span></th>
+          <th id="th1" onclick="sortBy(1)">Almirah No <span class="sico">↕</span></th>
+          <th id="th2" onclick="sortBy(2)">Rack No <span class="sico">↕</span></th>
+          <th id="th3" onclick="sortBy(3)">Location <span class="sico">↕</span></th>
+          <th id="th4" onclick="sortBy(4)">File Type <span class="sico">↕</span></th>
+          <th id="th5" onclick="sortBy(5)">File No <span class="sico">↕</span></th>
+          <th id="th6" onclick="sortBy(6)">File Name <span class="sico">↕</span></th>
+        </tr></thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+    <div class="cards-wrap" id="cardsWrap"></div>
+  </div>
+
+  <!-- Pagination -->
+  <div class="pagination" id="paginationRow" style="display:none">
+    <div class="pg-info" id="pgInfo"></div>
+    <div class="pg-btns" id="pgBtns"></div>
+  </div>
+
+</div><!-- /appContainer -->
+
+<script>
+/* ================================================================
+   CONFIGURATION — Admin: change DB_FILENAME if needed
+   The Excel file must be uploaded to the SAME GitHub folder
+   as this HTML file.
+   ================================================================ */
+const DB_FILENAME = 'casfiles.xlsx';
+
+/* ── State ── */
+let allData = [], filtered = [];
+let sortCol = -1, sortAsc = true, page = 1;
+const PER_PAGE = 20;
+let filtersOpen = false;
+
+/* ================================================================
+   AUTO-LOAD on page start
+   Fetches the Excel file from the same directory as the HTML page.
+   Works on GitHub Pages (https) and any static web server.
+   ================================================================ */
+window.addEventListener('DOMContentLoaded', () => {
+  const url = resolveDbUrl(DB_FILENAME);
+  document.getElementById('loadingSub').textContent = 'Fetching ' + DB_FILENAME + '…';
+  fetchAndLoad(url);
+});
+
+function resolveDbUrl(filename) {
+  /* Build URL relative to the HTML page's own location.
+     Works whether the page is at root or in a subfolder. */
+  const base = window.location.href.split('?')[0];          // strip query
+  const dir  = base.substring(0, base.lastIndexOf('/') + 1); // keep trailing /
+  return dir + filename;
+}
+
+function fetchAndLoad(url) {
+  fetch(url)
+    .then(res => {
+      if (!res.ok) throw new Error('HTTP ' + res.status + ' — ' + res.statusText);
+      return res.arrayBuffer();
+    })
+    .then(buf => {
+      parseExcel(buf, DB_FILENAME);
+    })
+    .catch(err => {
+      showError(
+        'Could not load <strong>' + DB_FILENAME + '</strong> from:<br>' +
+        '<code>' + url + '</code>',
+        url,
+        err.message
+      );
+    });
+}
+
+function parseExcel(buf, filename) {
+  try {
+    const data = new Uint8Array(buf);
+    const wb   = XLSX.read(data, { type: 'array' });
+    const ws   = wb.Sheets[wb.SheetNames[0]];
+    const json = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+    if (!json.length) {
+      showError('The file <strong>' + filename + '</strong> appears to be empty or unreadable.', '', '');
+      return;
+    }
+
+    allData = json.map((row, i) => {
+      const k = Object.keys(row);
+      return {
+        sl:       row[k[0]] || (i + 1),
+        almirah:  String(row[k[1]] || '').trim(),
+        rack:     String(row[k[2]] || '').trim(),
+        location: String(row[k[3]] || '').trim(),
+        fileType: String(row[k[4]] || '').trim(),
+        fileNo:   String(row[k[5]] || '').trim(),
+        fileName: String(row[k[6]] || '').trim(),
+      };
+    });
+
+    // Drop first row if it looks like column headers
+    if (String(allData[0].sl).toLowerCase().replace(/\s/g,'').includes('sl')) allData.shift();
+
+    populateFilters();
+    applyFilters();
+    showApp(filename);
+
+  } catch (err) {
+    showError('Error parsing <strong>' + filename + '</strong>.', '', err.message);
+  }
+}
+
+/* ── UI transitions ── */
+function showApp(filename) {
+  document.getElementById('loadingScreen').style.display = 'none';
+  document.getElementById('errorScreen').style.display   = 'none';
+  document.getElementById('appContainer').style.display  = 'block';
+
+  document.getElementById('dbName').textContent  = filename;
+  document.getElementById('dbCount').textContent = allData.length;
+  document.getElementById('dbTime').textContent  = 'Last loaded: ' + new Date().toLocaleTimeString();
+  updateStats();
+}
+
+function showError(msg, url, detail) {
+  document.getElementById('loadingScreen').style.display   = 'none';
+  document.getElementById('appContainer').style.display    = 'none';
+  const es = document.getElementById('errorScreen');
+  es.style.display = 'flex';
+  document.getElementById('errMsg').innerHTML  = msg;
+  document.getElementById('errCode').textContent = url + (detail ? '\n' + detail : '');
+}
+
+/* ── Populate dropdowns ── */
+function populateFilters() {
+  const fill = (id, vals) => {
+    const el = document.getElementById(id), first = el.options[0];
+    el.innerHTML = ''; el.appendChild(first);
+    [...new Set(vals.filter(Boolean))]
+      .sort((a,b) => String(a).localeCompare(String(b), undefined, {numeric:true}))
+      .forEach(v => { const o = document.createElement('option'); o.value = v; o.textContent = v; el.appendChild(o); });
+  };
+  fill('filterAlmirah', allData.map(r => r.almirah));
+  fill('filterRack',    allData.map(r => r.rack));
+  fill('filterType',    allData.map(r => r.fileType));
+}
+
+/* ── Filtering ── */
+function applyFilters() {
+  const q   = document.getElementById('searchGlobal').value.trim().toLowerCase();
+  const alm = document.getElementById('filterAlmirah').value;
+  const rck = document.getElementById('filterRack').value;
+  const typ = document.getElementById('filterType').value;
+
+  filtered = allData.filter(r => {
+    if (alm && r.almirah  !== alm) return false;
+    if (rck && r.rack     !== rck) return false;
+    if (typ && r.fileType !== typ) return false;
+    if (q) {
+      const hay = [r.sl,r.almirah,r.rack,r.location,r.fileType,r.fileNo,r.fileName].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  document.getElementById('filterBtn').classList.toggle('has-filters', !!(alm||rck||typ||q));
+  if (sortCol >= 0) doSort();
+  page = 1; renderAll();
+  document.getElementById('sFiltered').textContent = filtered.length;
+  document.getElementById('resultCount').textContent = filtered.length + ' record' + (filtered.length !== 1 ? 's' : '');
+}
+
+function updateStats() {
+  document.getElementById('sTotalFiles').textContent = allData.length;
+  document.getElementById('sAlmirahs').textContent   = new Set(allData.map(r => r.almirah)).size;
+  document.getElementById('sRacks').textContent      = new Set(allData.map(r => r.rack)).size;
+  document.getElementById('sFiltered').textContent   = allData.length;
+}
+
+/* ── Sorting ── */
+function sortBy(col) {
+  for (let i = 0; i < 7; i++) {
+    const th = document.getElementById('th' + i); if (!th) continue;
+    th.classList.toggle('sorted', i === col);
+    const si = th.querySelector('.sico');
+    if (si) si.textContent = (i === col) ? (sortAsc ? '↑' : '↓') : '↕';
+  }
+  if (sortCol === col) sortAsc = !sortAsc; else { sortCol = col; sortAsc = true; }
+  const thEl = document.getElementById('th' + col);
+  if (thEl) { const si = thEl.querySelector('.sico'); if (si) si.textContent = sortAsc ? '↑' : '↓'; }
+  doSort(); renderAll();
+}
+function doSort() {
+  const keys = ['sl','almirah','rack','location','fileType','fileNo','fileName'];
+  const k = keys[sortCol];
+  filtered.sort((a,b) => sortAsc
+    ? String(a[k]).localeCompare(String(b[k]), undefined, {numeric:true})
+    : String(b[k]).localeCompare(String(a[k]), undefined, {numeric:true}));
+}
+
+/* ── Helpers ── */
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function hl(text, q) {
+  if (!q) return esc(text);
+  return esc(String(text)).replace(
+    new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + ')', 'gi'),
+    '<mark>$1</mark>');
+}
+
+/* ── View toggle ── */
+function setView(v) {
+  document.getElementById('resultsWrap').className = v === 'table' ? 'table-view' : 'card-view';
+  document.getElementById('btnTV').classList.toggle('active', v === 'table');
+  document.getElementById('btnCV').classList.toggle('active', v === 'card');
+}
+
+/* ── Render ── */
+function renderAll() { renderTable(); renderCards(); renderPagination(); }
+function getRows() { return filtered.slice((page-1)*PER_PAGE, page*PER_PAGE); }
+
+function renderTable() {
+  const tbody = document.getElementById('tableBody');
+  const q = document.getElementById('searchGlobal').value.trim().toLowerCase();
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="7" class="no-data"><div class="icon">🔍</div><p>No records match your search.</p></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = getRows().map(r => `
+    <tr>
+      <td class="sl">${esc(r.sl)}</td>
+      <td><span class="badge b-alm">${hl(r.almirah,q)}</span></td>
+      <td><span class="badge b-rack">${hl(r.rack,q)}</span></td>
+      <td>${hl(r.location,q)}</td>
+      <td><span class="badge b-type">${hl(r.fileType,q)}</span></td>
+      <td><span class="badge b-fno">${hl(r.fileNo,q)}</span></td>
+      <td><strong>${hl(r.fileName,q)}</strong></td>
+    </tr>`).join('');
+}
+
+function renderCards() {
+  const wrap = document.getElementById('cardsWrap');
+  const q = document.getElementById('searchGlobal').value.trim().toLowerCase();
+  if (!filtered.length) {
+    wrap.innerHTML = `<div class="empty-state"><div class="icon">🔍</div><p>No records match.</p></div>`;
+    return;
+  }
+  wrap.innerHTML = getRows().map(r => `
+    <div class="file-card">
+      <div class="card-top">
+        <div class="card-title">${hl(r.fileName,q)}</div>
+        <div class="card-sl">#${esc(r.sl)}</div>
+      </div>
+      <div class="card-meta">
+        <span class="badge b-alm">🗄 Almirah ${hl(r.almirah,q)}</span>
+        <span class="badge b-rack">📦 Rack ${hl(r.rack,q)}</span>
+        <span class="badge b-type">📄 ${hl(r.fileType,q)}</span>
+        <span class="badge b-fno">🔢 ${hl(r.fileNo,q)}</span>
+      </div>
+      <div class="card-loc">📍&nbsp;<span>${r.location ? hl(r.location,q) : '<em style="color:var(--muted)">—</em>'}</span></div>
+    </div>`).join('');
+}
+
+function renderPagination() {
+  const pg = document.getElementById('paginationRow');
+  if (!filtered.length) { pg.style.display = 'none'; return; }
+  const total = Math.ceil(filtered.length / PER_PAGE);
+  if (total <= 1) { pg.style.display = 'none'; return; }
+  const s = (page-1)*PER_PAGE+1, e = Math.min(page*PER_PAGE, filtered.length);
+  document.getElementById('pgInfo').textContent = s + '–' + e + ' of ' + filtered.length;
+  pg.style.display = 'flex';
+  const btns = document.getElementById('pgBtns'); btns.innerHTML = '';
+  const add = (label, p, disabled, active) => {
+    const b = document.createElement('button');
+    b.className = 'pg-btn' + (active ? ' active' : '');
+    b.textContent = label; b.disabled = disabled;
+    b.onclick = () => { page = p; renderAll(); window.scrollTo({top:0,behavior:'smooth'}); };
+    btns.appendChild(b);
+  };
+  add('‹', page-1, page===1, false);
+  const lo = Math.max(1, page-2), hi = Math.min(total, page+2);
+  if (lo > 1) { add('1', 1, false, false); if (lo > 2) add('…', null, true, false); }
+  for (let i = lo; i <= hi; i++) add(i, i, false, i===page);
+  if (hi < total) { if (hi < total-1) add('…', null, true, false); add(total, total, false, false); }
+  add('›', page+1, page===total, false);
+}
+
+/* ── Filter panel toggle ── */
+function toggleFilters() {
+  filtersOpen = !filtersOpen;
+  document.getElementById('filtersPanel').classList.toggle('open', filtersOpen);
+  document.getElementById('filterBtn').classList.toggle('active', filtersOpen);
+}
+function resetFilters() {
+  ['searchGlobal','filterAlmirah','filterRack','filterType'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  applyFilters();
+}
+</script>
+</body>
+</html>
